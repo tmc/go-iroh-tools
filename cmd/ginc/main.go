@@ -17,7 +17,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("inc", flag.ExitOnError)
+	fs := flag.NewFlagSet("ginc", flag.ExitOnError)
 	var bind tool.BindFlags
 	alpn := fs.String("alpn", defaultALPN, "ALPN protocol")
 	timeout := fs.Duration("timeout", 30*time.Second, "dial timeout")
@@ -26,7 +26,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: inc [flags] <endpoint-ticket-or-id>")
+		return fmt.Errorf("usage: ginc [flags] <endpoint-ticket-or-id>")
 	}
 	addr, err := tool.ParseEndpoint(fs.Arg(0))
 	if err != nil {

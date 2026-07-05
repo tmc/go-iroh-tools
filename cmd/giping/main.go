@@ -21,7 +21,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("iping", flag.ExitOnError)
+	fs := flag.NewFlagSet("giping", flag.ExitOnError)
 	var bind tool.BindFlags
 	listen := fs.Bool("listen", false, "listen for iroh ping requests")
 	count := fs.Int("c", 4, "ping count")
@@ -35,7 +35,7 @@ func run(ctx context.Context) error {
 		return serve(ctx, bind)
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: iping [flags] <endpoint-ticket-or-id>")
+		return fmt.Errorf("usage: giping [flags] <endpoint-ticket-or-id>")
 	}
 	addr, err := tool.ParseEndpoint(fs.Arg(0))
 	if err != nil {

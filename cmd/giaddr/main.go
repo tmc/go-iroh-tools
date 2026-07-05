@@ -15,7 +15,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("iaddr", flag.ExitOnError)
+	fs := flag.NewFlagSet("giaddr", flag.ExitOnError)
 	var bind tool.BindFlags
 	wait := fs.Duration("wait", 0, "keep endpoint alive after printing")
 	tool.RegisterBindFlags(fs, &bind)

@@ -18,7 +18,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("ilisten", flag.ExitOnError)
+	fs := flag.NewFlagSet("gilisten", flag.ExitOnError)
 	var bind tool.BindFlags
 	alpn := fs.String("alpn", defaultALPN, "ALPN protocol")
 	echo := fs.Bool("echo", false, "echo received bytes instead of bridging stdin/stdout")
