@@ -2,7 +2,7 @@ module github.com/tmc/go-iroh-tools
 
 go 1.26
 
-require github.com/tmc/go-iroh v0.0.0
+require github.com/tmc/go-iroh v0.0.0-20260702234417-d5b13786f0ee
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect

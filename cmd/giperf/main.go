@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
@@ -59,10 +60,12 @@ func run(ctx context.Context) error {
 		return err
 	}
 	start := time.Now()
-	written, err := io.CopyN(stream, zeroReader{}, size)
-	if closeErr := stream.Close(); err == nil {
-		err = closeErr
+	var header [8]byte
+	binary.BigEndian.PutUint64(header[:], uint64(size))
+	if _, err := stream.Write(header[:]); err != nil {
+		return err
 	}
+	written, err := io.CopyN(stream, zeroReader{}, size)
 	if err != nil {
 		return err
 	}
@@ -78,25 +81,33 @@ func serve(ctx context.Context, bind tool.BindFlags, alpn string) error {
 	if err != nil {
 		return err
 	}
+	defer ep.Shutdown(context.Background())
+	if err := tool.WaitRelay(ctx, ep, bind); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, tool.LocalTicket(ep))
 	handler := iroh.ProtocolHandlerFunc(func(ctx context.Context, conn *iroh.Conn) error {
-		stream, err := conn.AcceptStreamConn(ctx)
-		if err != nil {
-			return err
+		for {
+			stream, err := conn.AcceptStreamConn(ctx)
+			if err != nil {
+				return err
+			}
+			start := time.Now()
+			var header [8]byte
+			if _, err := io.ReadFull(stream, header[:]); err != nil {
+				return err
+			}
+			want := int64(binary.BigEndian.Uint64(header[:]))
+			n, err := io.CopyN(io.Discard, stream, want)
+			if err != nil {
+				return err
+			}
+			elapsed := time.Since(start)
+			fmt.Fprintf(os.Stderr, "received bytes=%d elapsed=%s throughput=%s/s\n", n, elapsed.Round(time.Millisecond), rate(n, elapsed))
 		}
-		defer stream.Close()
-		start := time.Now()
-		n, err := io.Copy(io.Discard, stream)
-		if err != nil {
-			return err
-		}
-		elapsed := time.Since(start)
-		fmt.Fprintf(os.Stderr, "received bytes=%d elapsed=%s throughput=%s/s\n", n, elapsed.Round(time.Millisecond), rate(n, elapsed))
-		return nil
 	})
 	router, err := iroh.NewRouter(ep, map[string]iroh.ProtocolHandler{alpn: handler}, nil)
 	if err != nil {
-		ep.Shutdown(context.Background())
 		return err
 	}
 	defer router.Shutdown(context.Background())

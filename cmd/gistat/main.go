@@ -66,6 +66,10 @@ func serve(ctx context.Context, bind tool.BindFlags, alpn string) error {
 	if err != nil {
 		return err
 	}
+	defer ep.Shutdown(context.Background())
+	if err := tool.WaitRelay(ctx, ep, bind); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, tool.LocalTicket(ep))
 	handler := iroh.ProtocolHandlerFunc(func(ctx context.Context, conn *iroh.Conn) error {
 		<-conn.Context().Done()
@@ -73,7 +77,6 @@ func serve(ctx context.Context, bind tool.BindFlags, alpn string) error {
 	})
 	router, err := iroh.NewRouter(ep, map[string]iroh.ProtocolHandler{alpn: handler}, nil)
 	if err != nil {
-		ep.Shutdown(context.Background())
 		return err
 	}
 	defer router.Shutdown(context.Background())

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/tmc/go-iroh/endpointticket"
 	"github.com/tmc/go-iroh/iroh"
@@ -16,14 +19,16 @@ import (
 
 // BindFlags are common endpoint bind flags.
 type BindFlags struct {
-	Bind  string
-	Relay bool
+	Bind       string
+	Relay      bool
+	DirectOnly bool
 }
 
 // RegisterBindFlags registers common endpoint bind flags on fs.
 func RegisterBindFlags(fs *flag.FlagSet, f *BindFlags) {
 	fs.StringVar(&f.Bind, "bind", "127.0.0.1:0", "local UDP address")
-	fs.BoolVar(&f.Relay, "relay", false, "enable default iroh relays")
+	fs.BoolVar(&f.Relay, "relay", true, "enable default iroh relays")
+	fs.BoolVar(&f.DirectOnly, "direct-only", false, "disable relay transports")
 }
 
 // Bind creates an iroh endpoint from f.
@@ -35,7 +40,9 @@ func Bind(ctx context.Context, f BindFlags, opts ...iroh.Option) (*iroh.Endpoint
 		}
 		opts = append(opts, iroh.WithBindAddr(addr))
 	}
-	if f.Relay {
+	if f.DirectOnly {
+		opts = append(opts, iroh.WithoutRelayTransports())
+	} else if f.Relay {
 		opts = append(opts, iroh.WithRelayMode(relay.ModeDefault()))
 	}
 	ep, err := iroh.Bind(ctx, opts...)
@@ -52,11 +59,21 @@ func LocalTicket(ep *iroh.Endpoint) string {
 
 // LocalEndpointAddr returns ep's local endpoint address.
 func LocalEndpointAddr(ep *iroh.Endpoint) netaddr.EndpointAddr {
-	addr := netaddr.NewEndpointAddr(ep.ID())
-	if local := ep.LocalAddr(); local.IsValid() {
-		addr = addr.WithIP(local)
+	return ep.Addr()
+}
+
+// WaitRelay waits briefly for ep to connect to its home relay when f enables
+// relays. Direct-only endpoints do not have a home relay.
+func WaitRelay(ctx context.Context, ep *iroh.Endpoint, f BindFlags) error {
+	if f.DirectOnly || !f.Relay {
+		return nil
 	}
-	return addr
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := ep.Online(ctx); err != nil {
+		return fmt.Errorf("connect home relay: %w", err)
+	}
+	return nil
 }
 
 // ParseEndpoint parses s as an endpoint ticket, endpoint id, or endpoint addr.
@@ -73,7 +90,9 @@ func ParseEndpoint(s string) (netaddr.EndpointAddr, error) {
 
 // Run runs f and exits with status 1 on error.
 func Run(f func(context.Context) error) {
-	if err := f(context.Background()); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := f(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

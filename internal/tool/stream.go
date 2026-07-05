@@ -3,31 +3,42 @@ package tool
 import (
 	"io"
 	"net"
-	"sync"
 )
 
-// CopyStdio copies a stream to out and in to the stream until both sides stop.
+type closeWriter interface {
+	CloseWrite() error
+}
+
+// CopyStdio copies a stream to out and in to the stream until the remote side
+// stops sending. EOF on in half-closes the stream when the stream supports it.
 func CopyStdio(stream net.Conn, in io.Reader, out io.Writer) error {
-	var wg sync.WaitGroup
-	errc := make(chan error, 2)
-	wg.Add(2)
+	writec := make(chan error, 1)
+	readc := make(chan error, 1)
 	go func() {
-		defer wg.Done()
 		_, err := io.Copy(stream, in)
-		_ = stream.Close()
-		errc <- err
+		if cw, ok := stream.(closeWriter); ok {
+			if closeErr := cw.CloseWrite(); err == nil {
+				err = closeErr
+			}
+		} else {
+			_ = stream.Close()
+		}
+		writec <- err
 	}()
 	go func() {
-		defer wg.Done()
 		_, err := io.Copy(out, stream)
-		errc <- err
+		readc <- err
 	}()
-	wg.Wait()
-	close(errc)
-	for err := range errc {
-		if err != nil {
+	for {
+		select {
+		case err := <-writec:
+			if err != nil {
+				_ = stream.Close()
+				return err
+			}
+		case err := <-readc:
+			_ = stream.Close()
 			return err
 		}
 	}
-	return nil
 }

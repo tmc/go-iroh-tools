@@ -72,23 +72,31 @@ func serve(ctx context.Context, bind tool.BindFlags) error {
 	if err != nil {
 		return err
 	}
+	defer ep.Shutdown(context.Background())
+	if err := tool.WaitRelay(ctx, ep, bind); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, tool.LocalTicket(ep))
 	handler := iroh.ProtocolHandlerFunc(func(ctx context.Context, conn *iroh.Conn) error {
-		stream, err := conn.AcceptStreamConn(ctx)
-		if err != nil {
-			return err
+		for {
+			stream, err := conn.AcceptStreamConn(ctx)
+			if err != nil {
+				return err
+			}
+			var buf [16]byte
+			if _, err := io.ReadFull(stream, buf[:]); err != nil {
+				_ = stream.Close()
+				return err
+			}
+			_, err = stream.Write(buf[:])
+			_ = stream.Close()
+			if err != nil {
+				return err
+			}
 		}
-		defer stream.Close()
-		var buf [16]byte
-		if _, err := io.ReadFull(stream, buf[:]); err != nil {
-			return err
-		}
-		_, err = stream.Write(buf[:])
-		return err
 	})
 	router, err := iroh.NewRouter(ep, map[string]iroh.ProtocolHandler{pingALPN: handler}, nil)
 	if err != nil {
-		ep.Shutdown(context.Background())
 		return err
 	}
 	defer router.Shutdown(context.Background())

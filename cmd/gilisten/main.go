@@ -31,27 +31,41 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer ep.Shutdown(context.Background())
+	if !*echo && !*once {
+		return fmt.Errorf("stdio bridge requires -1; use -echo for multi-connection mode")
+	}
+	if err := tool.WaitRelay(ctx, ep, bind); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, tool.LocalTicket(ep))
 	done := make(chan error, 1)
 	handler := iroh.ProtocolHandlerFunc(func(ctx context.Context, conn *iroh.Conn) error {
-		stream, err := conn.AcceptStreamConn(ctx)
-		if err != nil {
-			return err
+		var err error
+		defer func() {
+			if *once {
+				done <- err
+			}
+		}()
+		for {
+			stream, acceptErr := conn.AcceptStreamConn(ctx)
+			if acceptErr != nil {
+				err = acceptErr
+				return err
+			}
+			if *echo {
+				_, err = io.Copy(stream, stream)
+			} else {
+				err = tool.CopyStdio(stream, os.Stdin, os.Stdout)
+			}
+			_ = stream.Close()
+			if err != nil || *once {
+				return err
+			}
 		}
-		defer stream.Close()
-		if *echo {
-			_, err = io.Copy(stream, stream)
-		} else {
-			err = tool.CopyStdio(stream, os.Stdin, os.Stdout)
-		}
-		if *once {
-			done <- err
-		}
-		return err
 	})
 	router, err := iroh.NewRouter(ep, map[string]iroh.ProtocolHandler{*alpn: handler}, nil)
 	if err != nil {
-		ep.Shutdown(context.Background())
 		return err
 	}
 	defer router.Shutdown(context.Background())

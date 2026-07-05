@@ -27,6 +27,9 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer ep.Shutdown(context.Background())
+	if err := tool.WaitRelay(ctx, ep, bind); err != nil {
+		return err
+	}
 	fmt.Printf("id\t%s\n", ep.ID())
 	fmt.Printf("local\t%s\n", ep.LocalAddr())
 	fmt.Printf("addr\t%s\n", tool.LocalEndpointAddr(ep))
