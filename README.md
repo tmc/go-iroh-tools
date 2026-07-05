@@ -11,6 +11,9 @@ The first tools are:
 - `giping`: measure stream round-trip time against an iroh ping listener.
 - `giperf`: measure iroh stream throughput.
 - `gistat`: print connection statistics and path information.
+- `giticket`: inspect, create, and shorten endpoint tickets.
+- `gikey`: generate keys and inspect endpoint IDs.
+- `girelay`: print and normalize relay URLs.
 
 Examples:
 
@@ -26,6 +29,15 @@ go run ./cmd/giperf -n 256MiB <endpoint-ticket>
 
 go run ./cmd/gistat -listen
 go run ./cmd/gistat <endpoint-ticket>
+
+go run ./cmd/giticket <endpoint-ticket>
+go run ./cmd/giticket -id <endpoint-id> -addr ip:127.0.0.1:1234
+
+go run ./cmd/gikey generate
+go run ./cmd/gikey inspect <endpoint-id-or-z32>
+
+go run ./cmd/girelay
+go run ./cmd/girelay -staging
 ```
 
 Tickets are endpoint tickets from `github.com/tmc/go-iroh/endpointticket`.
@@ -37,3 +49,5 @@ The commands intentionally mirror familiar Unix tools:
 - `giping` is iroh-native `ping`.
 - `giperf` is iroh-native `iperf`.
 - `gistat` is a compact iroh-native `ss -i`/`netstat` view.
+- `giticket`, `gikey`, and `girelay` cover the address, identity, and relay
+  plumbing around those data-path tools.
