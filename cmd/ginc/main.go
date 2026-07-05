@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -39,10 +40,25 @@ func run(ctx context.Context) error {
 	defer ep.Shutdown(context.Background())
 	dctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
-	stream, err := ep.Dial(dctx, addr, *alpn)
+	conn, err := ep.Connect(dctx, addr, *alpn)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	stream, err := conn.OpenStreamSync(ctx)
 	if err != nil {
 		return err
 	}
 	defer stream.Close()
+	if stat, err := os.Stdin.Stat(); err == nil && stat.Mode()&os.ModeCharDevice == 0 {
+		if _, err := io.Copy(stream, os.Stdin); err != nil {
+			return err
+		}
+		if err := stream.Close(); err != nil {
+			return err
+		}
+		_, err := io.Copy(os.Stdout, stream)
+		return err
+	}
 	return tool.CopyStdio(stream, os.Stdin, os.Stdout)
 }

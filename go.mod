@@ -14,5 +14,3 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
-
-replace github.com/tmc/go-iroh => ../go-iroh

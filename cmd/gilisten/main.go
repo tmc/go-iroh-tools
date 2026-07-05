@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -48,18 +49,25 @@ func run(ctx context.Context) error {
 			}
 		}()
 		for {
-			stream, acceptErr := conn.AcceptStreamConn(ctx)
+			stream, acceptErr := conn.AcceptStream(ctx)
 			if acceptErr != nil {
+				if errors.Is(acceptErr, context.Canceled) {
+					return nil
+				}
 				err = acceptErr
+				fmt.Fprintf(os.Stderr, "accept stream: %v\n", err)
 				return err
 			}
 			if *echo {
-				_, err = io.Copy(stream, stream)
+				err = echoStream(stream)
 			} else {
 				err = tool.CopyStdio(stream, os.Stdin, os.Stdout)
 			}
 			_ = stream.Close()
 			if err != nil || *once {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "handle stream: %v\n", err)
+				}
 				return err
 			}
 		}
@@ -74,4 +82,26 @@ func run(ctx context.Context) error {
 	}
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func echoStream(stream interface {
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+}) error {
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := stream.Read(buf)
+		if n > 0 {
+			if _, err := stream.Write(buf[:n]); err != nil {
+				fmt.Fprintf(os.Stderr, "echo write: %v\n", err)
+				return err
+			}
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) || errors.Is(readErr, os.ErrClosed) {
+				return nil
+			}
+			return readErr
+		}
+	}
 }

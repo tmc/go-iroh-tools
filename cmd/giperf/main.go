@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -90,6 +91,9 @@ func serve(ctx context.Context, bind tool.BindFlags, alpn string) error {
 		for {
 			stream, err := conn.AcceptStreamConn(ctx)
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil
+				}
 				return err
 			}
 			start := time.Now()

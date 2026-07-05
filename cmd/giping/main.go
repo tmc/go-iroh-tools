@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/tmc/go-iroh-tools/internal/tool"
 	"github.com/tmc/go-iroh/iroh"
-	"github.com/tmc/go-iroh/netaddr"
 )
 
 const pingALPN = "iroh-tools/ping/1"
@@ -46,6 +46,13 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer ep.Shutdown(context.Background())
+	dctx, cancel := context.WithTimeout(ctx, *timeout)
+	conn, err := ep.Connect(dctx, addr, pingALPN)
+	cancel()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
 	for seq := 0; seq < *count; seq++ {
 		if seq > 0 {
 			select {
@@ -56,7 +63,7 @@ func run(ctx context.Context) error {
 		}
 		start := time.Now()
 		pctx, cancel := context.WithTimeout(ctx, *timeout)
-		err := ping(pctx, ep, addr, uint64(seq), uint64(start.UnixNano()))
+		err := ping(pctx, conn, uint64(seq), uint64(start.UnixNano()))
 		cancel()
 		if err != nil {
 			fmt.Printf("seq=%d error=%v\n", seq, err)
@@ -81,6 +88,9 @@ func serve(ctx context.Context, bind tool.BindFlags) error {
 		for {
 			stream, err := conn.AcceptStreamConn(ctx)
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil
+				}
 				return err
 			}
 			var buf [16]byte
@@ -104,8 +114,8 @@ func serve(ctx context.Context, bind tool.BindFlags) error {
 	return ctx.Err()
 }
 
-func ping(ctx context.Context, ep *iroh.Endpoint, addr netaddr.EndpointAddr, seq, stamp uint64) error {
-	stream, err := ep.Dial(ctx, addr, pingALPN)
+func ping(ctx context.Context, conn *iroh.Conn, seq, stamp uint64) error {
+	stream, err := conn.OpenStreamConn(ctx)
 	if err != nil {
 		return err
 	}

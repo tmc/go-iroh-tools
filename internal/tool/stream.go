@@ -2,8 +2,13 @@ package tool
 
 import (
 	"io"
-	"net"
 )
+
+type readWriteCloser interface {
+	io.Reader
+	io.Writer
+	io.Closer
+}
 
 type closeWriter interface {
 	CloseWrite() error
@@ -11,7 +16,7 @@ type closeWriter interface {
 
 // CopyStdio copies a stream to out and in to the stream until the remote side
 // stops sending. EOF on in half-closes the stream when the stream supports it.
-func CopyStdio(stream net.Conn, in io.Reader, out io.Writer) error {
+func CopyStdio(stream readWriteCloser, in io.Reader, out io.Writer) error {
 	writec := make(chan error, 1)
 	readc := make(chan error, 1)
 	go func() {
