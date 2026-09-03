@@ -3,6 +3,15 @@
 `go-iroh-tools` provides small Unix-style networking tools backed by
 `github.com/tmc/go-iroh`.
 
+Install a command by its module path and version:
+
+```sh
+go install github.com/tmc/go-iroh-tools/cmd/ginc@latest
+```
+
+Each command is versioned with this repository. Before tagging a release,
+test all commands against the `go-iroh` version recorded in `go.mod`.
+
 The first tools are:
 
 - `giaddr`: print an iroh endpoint id, local address, endpoint address, and ticket.
