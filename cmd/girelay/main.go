@@ -1,7 +1,19 @@
+// Girelay prints relay URLs.
+//
+// Usage:
+//
+//	girelay [-staging]            print the configured relay map
+//	girelay <relay-url>...        print each URL in normalized form
+//
+// Both forms are offline. Printing the relay map reports what this build is
+// configured to use, and normalizing a URL is pure string work; neither
+// contacts a relay, so neither says anything about whether a relay is running
+// or reachable.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,9 +27,10 @@ import (
 func main() {
 	var staging bool
 	fs := flag.NewFlagSet("girelay", flag.ExitOnError)
-	fs.BoolVar(&staging, "staging", false, "print staging relay map")
+	fs.BoolVar(&staging, "staging", false, "print the staging relay map")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: girelay [-staging] [relay-url...]\n")
+		fmt.Fprintf(fs.Output(), "usage: girelay [-staging]\n")
+		fmt.Fprintf(fs.Output(), "       girelay <relay-url>...\n")
 		fs.PrintDefaults()
 	}
 	fs.Parse(os.Args[1:])
@@ -32,21 +45,30 @@ func run(w io.Writer, args []string, staging bool) error {
 		if staging {
 			m = relay.StagingMap()
 		}
-		printMap(w, m)
-		return nil
+		return printMap(w, m)
+	}
+	// -staging selects a built-in map, so it has nothing to say about URLs
+	// given on the command line.
+	if staging {
+		return errors.New("-staging applies only when printing the relay map")
 	}
 	for _, text := range args {
 		u, err := netaddr.ParseRelayURL(text)
 		if err != nil {
 			return fmt.Errorf("parse relay URL: %w", err)
 		}
-		fmt.Fprintln(w, u)
+		if _, err := fmt.Fprintln(w, u); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func printMap(w io.Writer, m *relay.Map) {
+func printMap(w io.Writer, m *relay.Map) error {
 	for _, u := range m.URLs() {
-		fmt.Fprintln(w, u)
+		if _, err := fmt.Fprintln(w, u); err != nil {
+			return err
+		}
 	}
+	return nil
 }

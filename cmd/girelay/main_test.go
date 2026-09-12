@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -36,3 +37,28 @@ func TestNormalizeRelayURL(t *testing.T) {
 		t.Fatalf("relay URL = %q, want %q", got, want)
 	}
 }
+
+// TestRunRejectsStagingWithURLs checks that a flag with nothing to say about
+// the given operands is refused rather than silently ignored.
+func TestRunRejectsStagingWithURLs(t *testing.T) {
+	var out bytes.Buffer
+	if err := run(&out, []string{"https://relay.example./"}, true); err == nil {
+		t.Fatalf("run with -staging and a URL = nil, want error; wrote %q", out.String())
+	}
+}
+
+// TestRunReportsOutputError checks that a rejected write is reported rather
+// than counted as success.
+func TestRunReportsOutputError(t *testing.T) {
+	want := errors.New("write failed")
+	for _, args := range [][]string{nil, {"https://relay.example./"}} {
+		err := run(errWriter{want}, args, false)
+		if !errors.Is(err, want) {
+			t.Fatalf("run(%q) = %v, want %v", args, err, want)
+		}
+	}
+}
+
+type errWriter struct{ err error }
+
+func (w errWriter) Write([]byte) (int, error) { return 0, w.err }
