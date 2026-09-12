@@ -48,7 +48,7 @@ func main() {
 	var addrs addrFlags
 	var short bool
 	var field string
-	fs := flag.NewFlagSet("giticket", flag.ExitOnError)
+	fs := flag.NewFlagSet("giticket", flag.ContinueOnError)
 	fs.StringVar(&idText, "id", "", "endpoint id for a new ticket")
 	fs.Var(&addrs, "addr", "transport address to include, such as ip:127.0.0.1:1234 or relay:https://relay.example./")
 	fs.BoolVar(&short, "short", false, "drop direct IP and custom addresses")
@@ -58,8 +58,10 @@ func main() {
 		fmt.Fprintf(fs.Output(), "       giticket [-short] -id <endpoint-id> [-addr <transport-addr>]...\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(os.Args[1:])
-	tool.Run(func(context.Context) error {
+	tool.Run(func(_ context.Context, args []string) error {
+		if err := tool.ParseFlags(fs, args); err != nil {
+			return err
+		}
 		return run(os.Stdout, fs.Args(), idText, addrs, short, field)
 	})
 }

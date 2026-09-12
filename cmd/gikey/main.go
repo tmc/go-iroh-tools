@@ -32,14 +32,16 @@ import (
 )
 
 func main() {
-	fs := flag.NewFlagSet("gikey", flag.ExitOnError)
+	fs := flag.NewFlagSet("gikey", flag.ContinueOnError)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: gikey generate\n")
 		fmt.Fprintf(fs.Output(), "       gikey public [secret-key]\n")
 		fmt.Fprintf(fs.Output(), "       gikey inspect <public-key-or-endpoint-id>\n")
 	}
-	fs.Parse(os.Args[1:])
-	tool.Run(func(context.Context) error {
+	tool.Run(func(_ context.Context, args []string) error {
+		if err := tool.ParseFlags(fs, args); err != nil {
+			return err
+		}
 		return run(os.Stdout, os.Stdin, fs.Args())
 	})
 }

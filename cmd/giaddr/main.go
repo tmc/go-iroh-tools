@@ -34,13 +34,13 @@ func main() {
 	tool.Run(run)
 }
 
-func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("giaddr", flag.ExitOnError)
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("giaddr", flag.ContinueOnError)
 	var bind tool.BindFlags
 	wait := fs.Duration("wait", 0, "keep the endpoint alive this long after printing")
 	field := fs.String("f", "", "print only this field's value ("+strings.Join(fields, ", ")+")")
 	tool.RegisterBindFlags(fs, &bind)
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {

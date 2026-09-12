@@ -36,14 +36,14 @@ func main() {
 	tool.Run(run)
 }
 
-func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("gilisten", flag.ExitOnError)
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("gilisten", flag.ContinueOnError)
 	var bind tool.BindFlags
 	alpn := fs.String("alpn", defaultALPN, "ALPN protocol")
 	echo := fs.Bool("echo", false, "echo received bytes instead of bridging stdin/stdout")
 	once := fs.Bool("1", false, "admit one connection and exit when it ends")
 	tool.RegisterBindFlags(fs, &bind)
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {

@@ -26,15 +26,17 @@ import (
 
 func main() {
 	var staging bool
-	fs := flag.NewFlagSet("girelay", flag.ExitOnError)
+	fs := flag.NewFlagSet("girelay", flag.ContinueOnError)
 	fs.BoolVar(&staging, "staging", false, "print the staging relay map")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: girelay [-staging]\n")
 		fmt.Fprintf(fs.Output(), "       girelay <relay-url>...\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(os.Args[1:])
-	tool.Run(func(context.Context) error {
+	tool.Run(func(_ context.Context, args []string) error {
+		if err := tool.ParseFlags(fs, args); err != nil {
+			return err
+		}
 		return run(os.Stdout, fs.Args(), staging)
 	})
 }

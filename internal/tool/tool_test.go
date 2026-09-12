@@ -2,6 +2,9 @@ package tool
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"io"
 	"net/netip"
 	"testing"
 
@@ -52,5 +55,32 @@ func TestLocalTicketRoundTrip(t *testing.T) {
 	}
 	if len(got.IPAddrs()) != 1 {
 		t.Fatalf("IPAddrs = %v, want one local addr", got.IPAddrs())
+	}
+}
+
+// TestParseFlags pins the policy that lets a runner parse flags in a test
+// without terminating the test binary: a mistake is ErrUsage, a help request is
+// flag.ErrHelp, and both stop the caller before it does any work.
+func TestParseFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want error
+	}{
+		{name: "ok", args: []string{"-n", "3", "operand"}, want: nil},
+		{name: "no args", args: nil, want: nil},
+		{name: "unknown flag", args: []string{"-nope"}, want: ErrUsage},
+		{name: "bad value", args: []string{"-n", "many"}, want: ErrUsage},
+		{name: "help", args: []string{"-h"}, want: flag.ErrHelp},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("test", flag.ContinueOnError)
+			fs.SetOutput(io.Discard)
+			fs.Int("n", 0, "count")
+			if err := ParseFlags(fs, tt.args); !errors.Is(err, tt.want) {
+				t.Fatalf("ParseFlags(%q) = %v, want %v", tt.args, err, tt.want)
+			}
+		})
 	}
 }

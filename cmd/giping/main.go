@@ -40,15 +40,15 @@ func main() {
 	tool.Run(run)
 }
 
-func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("giping", flag.ExitOnError)
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("giping", flag.ContinueOnError)
 	var bind tool.BindFlags
 	listen := fs.Bool("listen", false, "listen for iroh ping requests")
 	count := fs.Int("c", 4, "number of probes to send")
 	interval := fs.Duration("i", time.Second, "interval between probes")
 	timeout := fs.Duration("timeout", 5*time.Second, "per-probe timeout")
 	tool.RegisterBindFlags(fs, &bind)
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
 	}
 	// Validate every flag before binding an endpoint, so a typo fails

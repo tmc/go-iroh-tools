@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"io"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/tmc/go-iroh-tools/internal/irohtest"
+	"github.com/tmc/go-iroh-tools/internal/tool"
 	"github.com/tmc/go-iroh/iroh"
 )
 
@@ -251,3 +253,37 @@ func TestServeProbeRejectsTruncated(t *testing.T) {
 type stringer string
 
 func (s stringer) String() string { return string(s) }
+
+// TestRunValidatesBeforeBind checks that run rejects bad arguments and returns
+// the error instead of exiting, which is what makes the runner testable, and
+// that it does so before opening an endpoint.
+func TestRunValidatesBeforeBind(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want error
+	}{
+		{name: "unknown flag", args: []string{"-nope"}, want: tool.ErrUsage},
+		{name: "help", args: []string{"-h"}, want: flag.ErrHelp},
+		{name: "no operand", args: nil},
+		{name: "two operands", args: []string{"a", "b"}},
+		{name: "operand with -listen", args: []string{"-listen", "a"}},
+		{name: "zero count", args: []string{"-c", "0", "x"}},
+		{name: "negative interval", args: []string{"-i", "-1s", "x"}},
+		{name: "zero timeout", args: []string{"-timeout", "0", "-listen"}},
+		{name: "bad endpoint", args: []string{"-c", "1", "not-a-ticket"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := run(ctx, tt.args)
+			if err == nil {
+				t.Fatalf("run(%q) = nil, want error", tt.args)
+			}
+			if tt.want != nil && !errors.Is(err, tt.want) {
+				t.Fatalf("run(%q) = %v, want %v", tt.args, err, tt.want)
+			}
+		})
+	}
+}

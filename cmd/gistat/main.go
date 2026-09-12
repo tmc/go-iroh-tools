@@ -37,8 +37,8 @@ func main() {
 	tool.Run(run)
 }
 
-func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("gistat", flag.ExitOnError)
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("gistat", flag.ContinueOnError)
 	var bind tool.BindFlags
 	listen := fs.Bool("listen", false, "listen for stats probes")
 	alpn := fs.String("alpn", statALPN, "ALPN protocol")
@@ -46,7 +46,7 @@ func run(ctx context.Context) error {
 	count := fs.Int("n", 1, "number of samples to print")
 	interval := fs.Duration("i", time.Second, "interval between samples")
 	tool.RegisterBindFlags(fs, &bind)
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
 	}
 	if *timeout <= 0 {

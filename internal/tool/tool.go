@@ -126,19 +126,49 @@ func ParseEndpointID(s string) (key.EndpointID, error) {
 	return id, nil
 }
 
-// Run runs f with a context cancelled by SIGINT or SIGTERM, and exits with
-// status 1 on error.
+// ErrUsage reports a command-line error that the flag package has already
+// described on the command's error output. Run exits with status 2 and prints
+// nothing more, so a usage mistake is reported once.
+var ErrUsage = errors.New("usage error")
+
+// ParseFlags parses args with fs, which must have been created with
+// flag.ContinueOnError so that parsing reports errors instead of exiting.
+// It passes a help request back as flag.ErrHelp and reports any other parse
+// failure as ErrUsage, leaving the exit policy to Run. A caller returns either
+// unchanged, which both reports the mistake once and skips the work the flags
+// were being parsed for. A runner that parses its own flags this way can be
+// called from a test without terminating the test binary.
+func ParseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return ErrUsage
+	}
+	return nil
+}
+
+// Run runs f with the command's arguments and a context cancelled by SIGINT or
+// SIGTERM. A help request exits zero, ErrUsage exits with status 2, and any
+// other error is printed and exits with status 1. The flag package has already
+// reported both usage cases, so Run prints nothing more for them.
 //
 // A command interrupted by one of those signals reports the cancellation as
 // success: the operator asked it to stop and it stopped. Commands that need a
 // signal to mean failure, such as a probe that never completed, say so with
 // their own error rather than by propagating the cancellation.
-func Run(f func(context.Context) error) {
+func Run(f func(context.Context, []string) error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := f(ctx)
+	err := f(ctx, os.Args[1:])
 	if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 		return
+	}
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if errors.Is(err, ErrUsage) {
+		os.Exit(2)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

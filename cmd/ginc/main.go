@@ -36,13 +36,13 @@ func main() {
 	tool.Run(run)
 }
 
-func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("ginc", flag.ExitOnError)
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("ginc", flag.ContinueOnError)
 	var bind tool.BindFlags
 	alpn := fs.String("alpn", defaultALPN, "ALPN protocol")
 	timeout := fs.Duration("timeout", 30*time.Second, "dial timeout")
 	tool.RegisterBindFlags(fs, &bind)
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {

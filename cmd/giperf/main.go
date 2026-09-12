@@ -65,8 +65,8 @@ func main() {
 	tool.Run(run)
 }
 
-func run(ctx context.Context) error {
-	fs := flag.NewFlagSet("giperf", flag.ExitOnError)
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("giperf", flag.ContinueOnError)
 	var bind tool.BindFlags
 	listen := fs.Bool("listen", false, "listen for throughput tests")
 	n := fs.String("n", "64MiB", "bytes to send")
@@ -74,7 +74,7 @@ func run(ctx context.Context) error {
 	timeout := fs.Duration("timeout", 30*time.Second, "dial timeout")
 	transferTimeout := fs.Duration("transfer-timeout", 5*time.Minute, "deadline for the transfer and its confirmation")
 	tool.RegisterBindFlags(fs, &bind)
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
 	}
 	if *timeout <= 0 {
