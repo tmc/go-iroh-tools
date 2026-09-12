@@ -1,10 +1,29 @@
+// Ginc connects to an iroh endpoint and bridges the stream to stdin and stdout.
+//
+// Usage:
+//
+//	ginc [flags] <endpoint-ticket-or-id>
+//
+// Ginc is the dialing half of a pipe whose listening half is gilisten:
+//
+//	gilisten -1 >out 2>ticket &
+//	ginc "$(cat ticket)" <in
+//
+// Both directions run at once, so a payload of any size can be sent while the
+// peer replies. EOF on stdin half-closes the send direction only: the peer
+// sees the end of the request and its reply is still read, which is what lets
+// a request/response exchange work over a pipe. Ginc exits when the peer
+// closes its own send direction.
+//
+// An interrupt ends the transfer and exits zero. Bytes already written to
+// stdout are kept; ginc makes no promise that a stream ended this way is
+// complete.
 package main
 
 import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -49,16 +68,9 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
-	if stat, err := os.Stdin.Stat(); err == nil && stat.Mode()&os.ModeCharDevice == 0 {
-		if _, err := io.Copy(stream, os.Stdin); err != nil {
-			return err
-		}
-		if err := stream.Close(); err != nil {
-			return err
-		}
-		_, err := io.Copy(os.Stdout, stream)
-		return err
-	}
-	return tool.CopyStdio(stream, os.Stdin, os.Stdout)
+	// Both directions run concurrently whether stdin is a terminal or a pipe.
+	// Uploading first and only then reading the reply deadlocks as soon as the
+	// payload exceeds the peer's flow-control window: the peer stops reading
+	// to drain a send buffer nobody is receiving, and both sides wait.
+	return tool.CopyStdio(ctx, stream, os.Stdin, os.Stdout)
 }

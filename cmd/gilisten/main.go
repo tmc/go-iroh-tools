@@ -61,7 +61,7 @@ func run(ctx context.Context) error {
 			if *echo {
 				err = echoStream(stream)
 			} else {
-				err = tool.CopyStdio(stream, os.Stdin, os.Stdout)
+				err = tool.CopyStdio(ctx, stream, os.Stdin, os.Stdout)
 			}
 			_ = stream.Close()
 			if err != nil || *once {
