@@ -1,9 +1,12 @@
 // Giaddr prints the local endpoint's identity and dialable address.
 //
-// Each run generates a fresh keypair, binds an endpoint, prints it, and exits.
-// The identity and the ticket therefore last only as long as the process: they
-// name this invocation, not a service another host can come back to later. Use
-// -wait to hold the endpoint open while something dials it.
+// Each run binds an endpoint, prints it, and exits. Without -key the run
+// generates a fresh keypair, so the identity and the ticket last only as long
+// as the process: they name this invocation, not a service another host can
+// come back to later. With -key file the identity is read from file (as
+// written by gikey generate) and is the same on every run; the addresses in
+// the ticket still describe only this run. Use -wait to hold the endpoint open
+// while something dials it.
 //
 // Usage:
 //
@@ -11,10 +14,18 @@
 //
 // By default every field is printed as a name and a tab-separated value. Use
 // -f to print one field's value alone, for substitution into another command.
+// Use -json to print a single JSON object with the fields id, z32, local,
+// addr, ip_addrs, relay_urls, and ticket; ip_addrs and relay_urls are arrays,
+// empty rather than null when there are none. -f and -json are exclusive.
+//
+// Giaddr exits zero once it has printed the endpoint, or when -wait is cut
+// short by a signal, and nonzero if the endpoint cannot be bound.
 package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -31,14 +42,17 @@ import (
 var fields = []string{"id", "z32", "local", "addr", "ticket"}
 
 func main() {
-	tool.Run(run)
+	tool.Run(func(ctx context.Context, args []string) error {
+		return run(ctx, args, os.Stdout)
+	})
 }
 
-func run(ctx context.Context, args []string) error {
+func run(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("giaddr", flag.ContinueOnError)
 	var bind tool.BindFlags
 	wait := fs.Duration("wait", 0, "keep the endpoint alive this long after printing")
 	field := fs.String("f", "", "print only this field's value ("+strings.Join(fields, ", ")+")")
+	asJSON := fs.Bool("json", false, "print a single JSON object")
 	tool.RegisterBindFlags(fs, &bind)
 	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
@@ -48,6 +62,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	if *field != "" && !slices.Contains(fields, *field) {
 		return fmt.Errorf("unknown field %q; want one of %s", *field, strings.Join(fields, ", "))
+	}
+	if *field != "" && *asJSON {
+		return errors.New("-f and -json are mutually exclusive")
 	}
 	if *wait < 0 {
 		return fmt.Errorf("-wait must not be negative, got %s", *wait)
@@ -60,7 +77,12 @@ func run(ctx context.Context, args []string) error {
 	if err := tool.WaitRelay(ctx, ep, bind); err != nil {
 		return err
 	}
-	if err := printEndpoint(os.Stdout, ep, *field); err != nil {
+	if *asJSON {
+		err = printJSON(stdout, ep)
+	} else {
+		err = printEndpoint(stdout, ep, *field)
+	}
+	if err != nil {
 		return err
 	}
 	if *wait > 0 {
@@ -92,4 +114,36 @@ func printEndpoint(w io.Writer, ep *iroh.Endpoint, field string) error {
 		}
 	}
 	return nil
+}
+
+// endpointJSON is the -json output.
+type endpointJSON struct {
+	ID        string   `json:"id"`
+	Z32       string   `json:"z32"`
+	Local     string   `json:"local"`
+	Addr      string   `json:"addr"`
+	IPAddrs   []string `json:"ip_addrs"`
+	RelayURLs []string `json:"relay_urls"`
+	Ticket    string   `json:"ticket"`
+}
+
+// printJSON writes ep as one JSON object to w.
+func printJSON(w io.Writer, ep *iroh.Endpoint) error {
+	addr := ep.Addr()
+	v := endpointJSON{
+		ID:        ep.ID().String(),
+		Z32:       ep.ID().Z32(),
+		Local:     ep.LocalAddr().String(),
+		Addr:      addr.String(),
+		IPAddrs:   []string{},
+		RelayURLs: []string{},
+		Ticket:    tool.LocalTicket(ep),
+	}
+	for _, ap := range addr.IPAddrs() {
+		v.IPAddrs = append(v.IPAddrs, ap.String())
+	}
+	for _, u := range addr.RelayURLs() {
+		v.RelayURLs = append(v.RelayURLs, u.String())
+	}
+	return json.NewEncoder(w).Encode(v)
 }
