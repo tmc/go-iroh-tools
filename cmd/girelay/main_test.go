@@ -29,12 +29,27 @@ func TestDefaultAndStagingMaps(t *testing.T) {
 }
 
 func TestNormalizeRelayURL(t *testing.T) {
-	var out bytes.Buffer
-	if err := run(&out, []string{"https://relay.example.com"}, false); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"https://relay.example.com", "https://relay.example.com/"},
+		{"https://relay.example.com/", "https://relay.example.com/"},
+		{"https://RELAY.Example.com", "https://relay.example.com/"},
+		{"https://relay.example.com/prefix", "https://relay.example.com/prefix/"},
+		{"https://relay.example.com/prefix/", "https://relay.example.com/prefix/"},
+		{"https://relay.example.com/a/b", "https://relay.example.com/a/b/"},
+		{"https://relay.example.com/prefix?x=1", "https://relay.example.com/prefix/?x=1"},
 	}
-	if got, want := strings.TrimSpace(out.String()), "https://relay.example.com/"; got != want {
-		t.Fatalf("relay URL = %q, want %q", got, want)
+	for _, tt := range tests {
+		var out bytes.Buffer
+		if err := run(&out, []string{tt.in}, false); err != nil {
+			t.Errorf("run(%q): %v", tt.in, err)
+			continue
+		}
+		if got := strings.TrimSpace(out.String()); got != tt.want {
+			t.Errorf("run(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 

@@ -75,6 +75,29 @@ func TestRunShortDropsIPAddrs(t *testing.T) {
 	}
 }
 
+// TestRunKeepsRelayPathPrefix checks that a relay URL with a path prefix
+// survives a build and inspect round trip, normalized with a trailing slash.
+func TestRunKeepsRelayPathPrefix(t *testing.T) {
+	sk, err := key.GenerateSecretKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err = run(&out, nil, sk.Public().EndpointID().String(), []string{"relay:https://relay.example.com/prefix"}, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket := strings.TrimSpace(out.String())
+
+	out.Reset()
+	if err := run(&out, []string{ticket}, "", nil, false, "addr"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(out.String()), "relay:https://relay.example.com/prefix/"; got != want {
+		t.Fatalf("addr = %q, want %q", got, want)
+	}
+}
+
 // TestRunFieldSelection covers the output selection the docs point at: a
 // shortened ticket must come back as a bare ticket another command can take.
 func TestRunFieldSelection(t *testing.T) {
