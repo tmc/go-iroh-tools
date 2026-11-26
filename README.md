@@ -59,11 +59,13 @@ chmod 600 key
 go run ./cmd/gilisten -key key -echo
 ```
 
-The id is stable, but a ticket still records the addresses of the run that
-printed it, and these tools neither publish addresses nor look them up when
-dialing. After a restart, hand clients a fresh ticket; the id lets them
-check it names the endpoint they expect. `gilookup` finds addresses only for
-endpoints that publish them, such as other iroh software.
+A ticket records the id and the addresses of the run that printed it. With
+relays on, the relay address outlives a restart, so a ticket printed before
+the restart still reaches a listener started again with the same key; the
+direct address in it changes each run. These tools neither publish addresses
+nor look them up when dialing, so a bare id alone is not enough to connect.
+`gilookup` finds addresses only for endpoints that publish them, such as
+other iroh software.
 
 ## Piping
 
