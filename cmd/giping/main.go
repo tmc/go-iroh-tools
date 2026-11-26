@@ -10,6 +10,13 @@
 //	giping [flags] <endpoint-ticket-or-id>
 //	giping -listen [flags]
 //
+// Each answered probe prints its sequence number and round-trip time, and the
+// run ends with a loss summary. With -json giping instead prints a single JSON
+// object when it finishes, with the fields remote, probes (the -c count),
+// sent, received, and loss_pct, and, when any probe was answered, min_ns,
+// avg_ns, and max_ns: round-trip times in nanoseconds. -json does not apply
+// with -listen.
+//
 // Giping exits zero if at least one probe is answered, and nonzero if none is,
 // so partial loss is reported in the summary rather than in the exit status.
 // A run stopped by a signal reports what it completed and exits zero.
@@ -18,12 +25,14 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/tmc/go-iroh-tools/internal/tool"
@@ -37,16 +46,19 @@ const pingALPN = "iroh-tools/ping/1"
 const probeSize = 16
 
 func main() {
-	tool.Run(run)
+	tool.Run(func(ctx context.Context, args []string) error {
+		return run(ctx, args, os.Stdout)
+	})
 }
 
-func run(ctx context.Context, args []string) error {
+func run(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("giping", flag.ContinueOnError)
 	var bind tool.BindFlags
 	listen := fs.Bool("listen", false, "listen for iroh ping requests")
 	count := fs.Int("c", 4, "number of probes to send")
 	interval := fs.Duration("i", time.Second, "interval between probes")
 	timeout := fs.Duration("timeout", 5*time.Second, "per-probe timeout")
+	asJSON := fs.Bool("json", false, "print a single JSON summary at exit")
 	tool.RegisterBindFlags(fs, &bind)
 	if err := tool.ParseFlags(fs, args); err != nil {
 		return err
@@ -57,6 +69,9 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("-timeout must be positive, got %s", *timeout)
 	}
 	if *listen {
+		if *asJSON {
+			return errors.New("-json applies only when sending probes, not with -listen")
+		}
 		if fs.NArg() != 0 {
 			return fmt.Errorf("unexpected argument %q; -listen takes no operands", fs.Arg(0))
 		}
@@ -89,18 +104,40 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("dial %s: %w", addr.ID, err)
 	}
 	defer conn.Close()
-	return probe(ctx, conn, *count, *interval, *timeout)
+	lines := stdout
+	if *asJSON {
+		lines = io.Discard
+	}
+	r := probe(ctx, conn, *count, *interval, *timeout, lines)
+	if *asJSON {
+		err = r.writeJSON(stdout)
+	} else {
+		err = r.writeSummary(stdout)
+	}
+	if err != nil {
+		return err
+	}
+	return r.err()
 }
 
-// probe sends count probes and reports a summary. It fails only if no probe is
-// answered; see the package comment for the exit policy.
-func probe(ctx context.Context, conn *iroh.Conn, count int, interval, timeout time.Duration) error {
-	var sent, received int
+// result is the outcome of a run of probes.
+type result struct {
+	remote         fmt.Stringer
+	probes         int             // probes requested
+	sent, received int             // probes sent and answered
+	rtts           []time.Duration // round-trip time of each answered probe
+}
+
+// probe sends count probes, writing a line for each to w, and returns what
+// happened. A cancelled ctx ends the run early with the probes completed so
+// far.
+func probe(ctx context.Context, conn *iroh.Conn, count int, interval, timeout time.Duration, w io.Writer) result {
+	r := result{remote: conn.RemoteID(), probes: count}
 	for seq := range count {
 		if seq > 0 {
 			select {
 			case <-ctx.Done():
-				return summarize(sent, received, conn.RemoteID())
+				return r
 			case <-time.After(interval):
 			}
 		}
@@ -108,31 +145,78 @@ func probe(ctx context.Context, conn *iroh.Conn, count int, interval, timeout ti
 		pctx, cancel := context.WithTimeout(ctx, timeout)
 		err := ping(pctx, conn, uint64(seq), uint64(start.UnixNano()))
 		cancel()
-		sent++
+		rtt := time.Since(start)
+		r.sent++
 		if err != nil {
 			if ctx.Err() != nil {
-				return summarize(sent, received, conn.RemoteID())
+				return r
 			}
-			fmt.Printf("seq=%d error=%v\n", seq, err)
+			fmt.Fprintf(w, "seq=%d error=%v\n", seq, err)
 			continue
 		}
-		received++
-		fmt.Printf("seq=%d time=%s\n", seq, time.Since(start).Round(time.Microsecond))
+		r.received++
+		r.rtts = append(r.rtts, rtt)
+		fmt.Fprintf(w, "seq=%d time=%s\n", seq, rtt.Round(time.Microsecond))
 	}
-	return summarize(sent, received, conn.RemoteID())
+	return r
 }
 
-// summarize prints the loss summary and reports whether the run found a peer.
-func summarize(sent, received int, remote fmt.Stringer) error {
-	loss := 100.0
-	if sent > 0 {
-		loss = float64(sent-received) / float64(sent) * 100
+// lossPct reports the percentage of sent probes that went unanswered, or 100
+// if none was sent.
+func (r result) lossPct() float64 {
+	if r.sent == 0 {
+		return 100
 	}
-	fmt.Printf("%d sent, %d received, %.0f%% loss\n", sent, received, loss)
-	if sent > 0 && received == 0 {
-		return fmt.Errorf("no reply from %s", remote)
+	return float64(r.sent-r.received) / float64(r.sent) * 100
+}
+
+// err reports whether the run found a peer; see the package comment for the
+// exit policy.
+func (r result) err() error {
+	if r.sent > 0 && r.received == 0 {
+		return fmt.Errorf("no reply from %s", r.remote)
 	}
 	return nil
+}
+
+// writeSummary writes the text loss summary to w.
+func (r result) writeSummary(w io.Writer) error {
+	_, err := fmt.Fprintf(w, "%d sent, %d received, %.0f%% loss\n", r.sent, r.received, r.lossPct())
+	return err
+}
+
+// resultJSON is the -json output.
+type resultJSON struct {
+	Remote   string  `json:"remote"`
+	Probes   int     `json:"probes"`
+	Sent     int     `json:"sent"`
+	Received int     `json:"received"`
+	LossPct  float64 `json:"loss_pct"`
+	MinNS    *int64  `json:"min_ns,omitempty"`
+	AvgNS    *int64  `json:"avg_ns,omitempty"`
+	MaxNS    *int64  `json:"max_ns,omitempty"`
+}
+
+// writeJSON writes r to w as one JSON object.
+func (r result) writeJSON(w io.Writer) error {
+	v := resultJSON{
+		Remote:   r.remote.String(),
+		Probes:   r.probes,
+		Sent:     r.sent,
+		Received: r.received,
+		LossPct:  r.lossPct(),
+	}
+	if len(r.rtts) > 0 {
+		lo, hi := slices.Min(r.rtts), slices.Max(r.rtts)
+		var sum time.Duration
+		for _, d := range r.rtts {
+			sum += d
+		}
+		minNS, maxNS := int64(lo), int64(hi)
+		avgNS := int64(sum) / int64(len(r.rtts))
+		v.MinNS, v.AvgNS, v.MaxNS = &minNS, &avgNS, &maxNS
+	}
+	return json.NewEncoder(w).Encode(v)
 }
 
 func serve(ctx context.Context, bind tool.BindFlags) error {
