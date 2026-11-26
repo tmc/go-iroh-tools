@@ -23,6 +23,11 @@ The tools are:
 - `giticket`: inspect, create, and shorten endpoint tickets.
 - `gikey`: generate keys and inspect endpoint IDs.
 - `girelay`: print and normalize relay URLs.
+- `giblob`: serve a file or stdin as a verified blob, and fetch one by ticket.
+- `gigossip`: publish stdin lines to a gossip topic and print what arrives.
+- `giforward`: forward TCP connections across an iroh connection.
+- `gireport`: report UDP reachability, public addresses, and relay latency.
+- `gilookup`: look up the addresses an endpoint id has published.
 
 Run `go doc ./cmd/<name>` for a command's input, output, and exit contract.
 
@@ -41,6 +46,24 @@ go run ./cmd/ginc -direct-only "$(head -1 ticket)" <request >response
 Tickets are endpoint tickets from `github.com/tmc/go-iroh/endpointticket`.
 Wherever a command takes an endpoint id, both hex and z-base-32 are accepted,
 so an id printed by any of these tools can be pasted into any other.
+
+## Identity
+
+Without `-key`, every run generates a fresh key, so its endpoint id and
+tickets name that run only. `-key file` loads a secret key as printed by
+`gikey generate`, so a listener keeps its id across restarts:
+
+```sh
+go run ./cmd/gikey generate >key
+chmod 600 key
+go run ./cmd/gilisten -key key -echo
+```
+
+The id is stable, but a ticket still records the addresses of the run that
+printed it, and these tools neither publish addresses nor look them up when
+dialing. After a restart, hand clients a fresh ticket; the id lets them
+check it names the endpoint they expect. `gilookup` finds addresses only for
+endpoints that publish them, such as other iroh software.
 
 ## Piping
 
@@ -92,11 +115,23 @@ configure any relay, while `-direct-only` disables relay transports outright.
 `-direct-only` takes precedence over `-relay`. Prefer it when direct-only
 operation is the intent.
 
+`-relay-url url` (repeatable) replaces the default relays with the ones
+named, and `-staging` selects number0's staging relays. A relay URL may carry
+a path prefix, which is kept. Both choose relays, so each is an error with the
+other, with `-direct-only`, or with `-relay=false`.
+
 With relays enabled — the default — a listener waits up to ten seconds to reach
 its home relay before printing its ticket, and fails if it cannot. Relay
 service is thus a startup dependency of the default configuration. Pass
 `-direct-only` to skip the wait, which is what the loopback examples here do so
 they run offline.
+
+## Debugging
+
+`-qlog dir` writes a qlog trace of each QUIC connection into dir, and
+`-keylog file` appends the TLS secrets of direct connections to file in NSS
+key log format, for Wireshark. A key log lets anyone holding it decrypt those
+connections; use it only for debugging.
 
 ## Measurement contracts
 
@@ -117,9 +152,22 @@ processes' connections the way `ss(8)` does; there is no system table of iroh
 connections to read. A fresh connection reports little, so use `-n` and `-i` to
 sample repeatedly and watch paths settle.
 
+`gireport` binds to the wildcard address by default, unlike the other
+tools, so its probes can leave the host. It waits for one network report and
+prints it; it never invents a field the report does not have, such as
+hairpinning.
+
 `girelay` is offline in both forms. Printing the relay map reports what this
 build is configured to use and normalizing a URL is string work; neither
 contacts a relay, so neither says whether a relay is reachable.
+
+## Machine-readable output
+
+`giaddr`, `giping`, `gistat`, `gireport`, and `gilookup` take `-json`.
+`giaddr`, `giping`, and `gireport` print one object; `gistat` prints one
+object per sample and `gilookup` one per record, each on its own line.
+Durations are integer nanoseconds in fields ending in `_ns`, and lists are
+empty arrays rather than null. `-json` and `-f` are mutually exclusive.
 
 ## Exit status
 
@@ -127,7 +175,8 @@ A command exits 0 on success, 2 for a command-line mistake such as an unknown
 flag, and 1 for anything else. A run stopped by SIGINT or SIGTERM exits 0: the
 operator asked it to stop and it stopped. A command that needs an interruption
 to count as failure says so itself — `giping` reports total loss as an error
-whether or not the run was cut short.
+whether or not the run was cut short, and `gireport` and `gilookup` fail when
+interrupted before they have an answer to print.
 
 ## Examples
 
@@ -154,9 +203,25 @@ go run ./cmd/gikey inspect <public-key-or-endpoint-id>
 
 go run ./cmd/girelay
 go run ./cmd/girelay -staging
+
+go run ./cmd/giblob -serve -direct-only file 2>ticket &
+go run ./cmd/giblob -direct-only -o copy "$(head -1 ticket)"
+
+go run ./cmd/gigossip chat 2>ticket          # first node
+go run ./cmd/gigossip chat <endpoint-ticket> # every other node
+
+go run ./cmd/giforward -listen -to 127.0.0.1:22 2>ticket &
+go run ./cmd/giforward -from 127.0.0.1:2222 "$(head -1 ticket)" &
+ssh -p 2222 127.0.0.1
+
+go run ./cmd/gireport
+go run ./cmd/gireport -json
+
+go run ./cmd/gilookup <endpoint-id>
+go run ./cmd/ginc "$(go run ./cmd/gilookup -f ticket <endpoint-id>)"
 ```
 
-`giaddr` and `giticket` print several labeled fields; `-f` selects one and
+`giaddr`, `giticket`, `gireport`, and `gilookup` print several labeled fields; `-f` selects one and
 prints its value alone, for substitution into another command.
 
 The commands intentionally mirror familiar Unix tools:
@@ -166,5 +231,9 @@ The commands intentionally mirror familiar Unix tools:
 - `giping` is iroh-native `ping`.
 - `giperf` is iroh-native `iperf`.
 - `gistat` is a compact iroh-native `ss -i`/`netstat` view.
+- `giblob` is a verified, iroh-native `scp` for one file.
+- `giforward` is iroh-native `ssh -L`.
+- `gireport` is an iroh-native `netcheck`.
+- `gilookup` is iroh-native `dig`.
 - `giticket`, `gikey`, and `girelay` cover the address, identity, and relay
   plumbing around those data-path tools.
