@@ -52,11 +52,11 @@ func run(ctx context.Context, args []string) error {
 	if !*echo && !*once {
 		return fmt.Errorf("stdio bridge requires -1; use -echo for multi-connection mode")
 	}
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	if *once {
 		return serveOnce(ctx, ep, bind, *alpn, *echo, os.Stderr)
 	}

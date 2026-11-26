@@ -1,13 +1,16 @@
 package tool
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +26,18 @@ type BindFlags struct {
 	Bind       string
 	Relay      bool
 	DirectOnly bool
+	// RelayURLs replaces the default relays with these. Staging selects
+	// the staging relays instead. Both need relays enabled.
+	RelayURLs []string
+	Staging   bool
+	// Key names a file holding the endpoint's secret key, in the format
+	// gikey generate prints. Without it each run has a new endpoint id.
+	Key string
+	// QLOG names a directory for qlog traces of each connection, and KeyLog
+	// a file to append TLS secrets to in NSS key log format. Both are for
+	// debugging; KeyLog compromises the confidentiality of every connection.
+	QLOG   string
+	KeyLog string
 }
 
 // RegisterBindFlags registers common endpoint bind flags on fs.
@@ -37,32 +52,164 @@ func RegisterBindFlags(fs *flag.FlagSet, f *BindFlags) {
 	fs.StringVar(&f.Bind, "bind", "127.0.0.1:0", "local UDP address")
 	fs.BoolVar(&f.Relay, "relay", true, "use the default iroh relays")
 	fs.BoolVar(&f.DirectOnly, "direct-only", false, "disable relay transports (overrides -relay)")
+	fs.Func("relay-url", "use this relay instead of the defaults (repeatable)", func(s string) error {
+		f.RelayURLs = append(f.RelayURLs, s)
+		return nil
+	})
+	fs.BoolVar(&f.Staging, "staging", false, "use the staging iroh relays")
+	fs.StringVar(&f.Key, "key", "", "read the endpoint secret key from `file`")
+	fs.StringVar(&f.QLOG, "qlog", "", "write qlog traces to `dir`")
+	fs.StringVar(&f.KeyLog, "keylog", "", "append TLS secrets to `file` (debugging only)")
 }
 
-// Bind creates an iroh endpoint from f.
+// Bind creates an iroh endpoint from f. The returned function shuts the
+// endpoint down and releases anything Bind opened for it; the caller must
+// call it once it is done with the endpoint.
 //
 // -direct-only takes precedence over -relay: it disables relay transports
 // outright, while -relay=false merely declines to configure any relay. Both
 // leave the endpoint reachable only over direct addresses, but only
 // -direct-only says so to the endpoint, so prefer it when that is the intent.
-func Bind(ctx context.Context, f BindFlags, opts ...iroh.Option) (*iroh.Endpoint, error) {
+// -relay-url and -staging choose which relays to use, so each is an error
+// alongside either of those flags or the other.
+func Bind(ctx context.Context, f BindFlags, opts ...iroh.Option) (*iroh.Endpoint, func(), error) {
+	relayOpt, err := f.relayOption()
+	if err != nil {
+		return nil, nil, err
+	}
+	if relayOpt != nil {
+		opts = append(opts, relayOpt)
+	}
 	if f.Bind != "" {
 		addr, err := netip.ParseAddrPort(f.Bind)
 		if err != nil {
-			return nil, fmt.Errorf("parse bind address: %w", err)
+			return nil, nil, fmt.Errorf("parse bind address: %w", err)
 		}
 		opts = append(opts, iroh.WithBindAddr(addr))
 	}
-	if f.DirectOnly {
-		opts = append(opts, iroh.WithoutRelayTransports())
-	} else if f.Relay {
-		opts = append(opts, iroh.WithRelayMode(relay.ModeDefault()))
+	if f.Key != "" {
+		sk, err := ReadSecretKeyFile(f.Key)
+		if err != nil {
+			return nil, nil, err
+		}
+		// The endpoint keeps sk, so it must not be cleared here.
+		opts = append(opts, iroh.WithSecretKey(sk))
+	}
+	if f.QLOG != "" {
+		// QLOGDir drops traces silently if it cannot create the directory,
+		// so create it here, where the failure can be reported.
+		if err := os.MkdirAll(f.QLOG, 0o755); err != nil {
+			return nil, nil, fmt.Errorf("create qlog directory: %w", err)
+		}
+		opts = append(opts, iroh.WithQLOG(iroh.QLOGDir(f.QLOG)))
+	}
+	var keyLog *os.File
+	if f.KeyLog != "" {
+		keyLog, err = os.OpenFile(f.KeyLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open key log: %w", err)
+		}
+		opts = append(opts, iroh.WithKeyLogWriter(keyLog))
 	}
 	ep, err := iroh.Bind(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("bind endpoint: %w", err)
+		if keyLog != nil {
+			keyLog.Close()
+		}
+		return nil, nil, fmt.Errorf("bind endpoint: %w", err)
 	}
-	return ep, nil
+	cleanup := func() {
+		ep.Shutdown(context.Background())
+		if keyLog != nil {
+			keyLog.Close()
+		}
+	}
+	return ep, cleanup, nil
+}
+
+// relayOption validates the relay flags in f and returns the endpoint option
+// they select, or nil when they select none.
+func (f BindFlags) relayOption() (iroh.Option, error) {
+	choosing := len(f.RelayURLs) > 0 || f.Staging
+	switch {
+	case len(f.RelayURLs) > 0 && f.Staging:
+		return nil, errors.New("-relay-url and -staging are mutually exclusive")
+	case choosing && f.DirectOnly:
+		return nil, errors.New("-relay-url and -staging need relays; -direct-only disables them")
+	case choosing && !f.Relay:
+		return nil, errors.New("-relay-url and -staging need relays; -relay=false disables them")
+	}
+	switch {
+	case f.DirectOnly:
+		return iroh.WithoutRelayTransports(), nil
+	case len(f.RelayURLs) > 0:
+		urls := make([]netaddr.RelayURL, 0, len(f.RelayURLs))
+		for _, s := range f.RelayURLs {
+			u, err := ParseRelayURL(s)
+			if err != nil {
+				return nil, err
+			}
+			urls = append(urls, u)
+		}
+		return iroh.WithRelayMode(relay.ModeCustomURLs(urls...)), nil
+	case f.Staging:
+		return iroh.WithRelayMode(relay.ModeStaging()), nil
+	case f.Relay:
+		return iroh.WithRelayMode(relay.ModeDefault()), nil
+	}
+	return nil, nil
+}
+
+// ParseRelayURL parses s as the URL of a relay server: an http or https URL
+// with a host. Any path is kept as a prefix under which the relay is served.
+func ParseRelayURL(s string) (netaddr.RelayURL, error) {
+	u, err := netaddr.ParseRelayURL(s)
+	if err != nil {
+		return netaddr.RelayURL{}, fmt.Errorf("parse relay URL: %w", err)
+	}
+	if uu := u.URL(); (uu.Scheme != "http" && uu.Scheme != "https") || uu.Host == "" {
+		return netaddr.RelayURL{}, fmt.Errorf("parse relay URL %q: want an http or https URL with a host", s)
+	}
+	return u, nil
+}
+
+// ParseSecretKey reads a secret key from r in the format gikey generate
+// prints: the first non-blank line, either a bare key or one labeled
+// "secret ". The key may be hex or z-base-32.
+func ParseSecretKey(r io.Reader) (key.SecretKey, error) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "secret "); ok {
+			line = strings.TrimSpace(rest)
+		}
+		sk, err := key.ParseSecretKey(line)
+		if err != nil {
+			return key.SecretKey{}, fmt.Errorf("parse secret key: %w", err)
+		}
+		return sk, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return key.SecretKey{}, fmt.Errorf("read secret key: %w", err)
+	}
+	return key.SecretKey{}, errors.New("no secret key found")
+}
+
+// ReadSecretKeyFile reads a secret key from the named file, as ParseSecretKey.
+func ReadSecretKeyFile(name string) (key.SecretKey, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return key.SecretKey{}, fmt.Errorf("read secret key: %w", err)
+	}
+	defer f.Close()
+	sk, err := ParseSecretKey(f)
+	if err != nil {
+		return key.SecretKey{}, fmt.Errorf("%s: %w", name, err)
+	}
+	return sk, nil
 }
 
 // LocalTicket returns an endpoint ticket for ep's local address.
@@ -71,7 +218,7 @@ func LocalTicket(ep *iroh.Endpoint) string {
 }
 
 // WaitRelay waits up to ten seconds for ep to reach its home relay when f
-// enables relays, and reports an error if it does not. Listeners call it
+// enables relays, whether the default, staging, or custom ones, and reports an error if it does not. Listeners call it
 // before publishing a ticket so the advertised relay address is one the
 // endpoint has actually reached.
 //

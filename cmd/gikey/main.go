@@ -17,7 +17,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -25,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/tmc/go-iroh-tools/internal/tool"
 	"github.com/tmc/go-iroh/key"
@@ -64,13 +62,9 @@ func run(w io.Writer, in io.Reader, args []string) error {
 		if len(args) > 2 {
 			return errors.New("usage: gikey public [secret-key]")
 		}
-		text, err := secretText(in, args[1:])
+		sk, err := readSecret(in, args[1:])
 		if err != nil {
 			return err
-		}
-		sk, err := key.ParseSecretKey(text)
-		if err != nil {
-			return fmt.Errorf("parse secret key: %w", err)
 		}
 		return printPublic(w, sk.Public())
 	case "inspect":
@@ -87,28 +81,20 @@ func run(w io.Writer, in io.Reader, args []string) error {
 	}
 }
 
-// secretText returns the secret key text from args, or reads it from in.
-func secretText(in io.Reader, args []string) (string, error) {
+// readSecret parses the secret key in args, or reads it from in.
+func readSecret(in io.Reader, args []string) (key.SecretKey, error) {
 	if len(args) == 1 {
-		return args[0], nil
-	}
-	scanner := bufio.NewScanner(in)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+		sk, err := key.ParseSecretKey(args[0])
+		if err != nil {
+			return key.SecretKey{}, fmt.Errorf("parse secret key: %w", err)
 		}
-		// Accept the labeled line that generate prints as well as a bare key,
-		// so the two commands pipe together.
-		if rest, ok := strings.CutPrefix(line, "secret "); ok {
-			return strings.TrimSpace(rest), nil
-		}
-		return line, nil
+		return sk, nil
 	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("read secret key: %w", err)
+	sk, err := tool.ParseSecretKey(in)
+	if err != nil {
+		return key.SecretKey{}, fmt.Errorf("stdin: %w", err)
 	}
-	return "", errors.New("no secret key on stdin")
+	return sk, nil
 }
 
 func printSecret(w io.Writer, sk key.SecretKey) error {

@@ -75,11 +75,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	dctx, cancel := context.WithTimeout(ctx, *timeout)
 	conn, err := ep.Connect(dctx, addr, pingALPN)
 	cancel()
@@ -136,11 +136,11 @@ func summarize(sent, received int, remote fmt.Stringer) error {
 }
 
 func serve(ctx context.Context, bind tool.BindFlags) error {
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	handler := iroh.ProtocolHandlerFunc(func(ctx context.Context, conn *iroh.Conn) error {
 		for {
 			stream, err := conn.AcceptStreamConn(ctx)

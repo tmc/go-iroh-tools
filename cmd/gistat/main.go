@@ -71,11 +71,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	dctx, cancel := context.WithTimeout(ctx, *timeout)
 	conn, err := ep.Connect(dctx, addr, *alpn)
 	cancel()
@@ -184,11 +184,11 @@ func printPath(w io.Writer, p iroh.PathInfo) error {
 }
 
 func serve(ctx context.Context, bind tool.BindFlags, alpn string) error {
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	handler := iroh.ProtocolHandlerFunc(func(ctx context.Context, conn *iroh.Conn) error {
 		// The probe measures the connection itself, so the server only has to
 		// keep it open until the client is finished with it.

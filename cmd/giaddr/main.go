@@ -52,11 +52,11 @@ func run(ctx context.Context, args []string) error {
 	if *wait < 0 {
 		return fmt.Errorf("-wait must not be negative, got %s", *wait)
 	}
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	if err := tool.WaitRelay(ctx, ep, bind); err != nil {
 		return err
 	}

@@ -52,11 +52,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	dctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 	conn, err := ep.Connect(dctx, addr, *alpn)

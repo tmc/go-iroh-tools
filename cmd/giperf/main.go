@@ -100,11 +100,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	dctx, cancel := context.WithTimeout(ctx, *timeout)
 	conn, err := ep.Connect(dctx, addr, *alpn)
 	cancel()
@@ -174,11 +174,11 @@ func readReply(stream net.Conn) (status uint64, received int64, err error) {
 }
 
 func serve(ctx context.Context, bind tool.BindFlags, alpn string) error {
-	ep, err := tool.Bind(ctx, bind)
+	ep, closeEndpoint, err := tool.Bind(ctx, bind)
 	if err != nil {
 		return err
 	}
-	defer ep.Shutdown(context.Background())
+	defer closeEndpoint()
 	handler := iroh.ProtocolHandlerFunc(func(ctx context.Context, conn *iroh.Conn) error {
 		for {
 			stream, err := conn.AcceptStreamConn(ctx)

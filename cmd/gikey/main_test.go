@@ -58,34 +58,6 @@ func TestPublicFromStdin(t *testing.T) {
 	}
 }
 
-func TestSecretText(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		args []string
-		want string
-	}{
-		{name: "argument wins", in: "ignored\n", args: []string{"abc"}, want: "abc"},
-		{name: "bare line", in: "abc\n", want: "abc"},
-		{name: "labeled line", in: "secret abc\n", want: "abc"},
-		{name: "leading blank lines", in: "\n\nsecret abc\n", want: "abc"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := secretText(strings.NewReader(tt.in), tt.args)
-			if err != nil {
-				t.Fatalf("secretText: %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("secretText = %q, want %q", got, tt.want)
-			}
-		})
-	}
-	if _, err := secretText(strings.NewReader(""), nil); err == nil {
-		t.Fatal("secretText succeeded on empty stdin")
-	}
-}
-
 func TestRunRejectsBadInput(t *testing.T) {
 	tests := []struct {
 		name string
