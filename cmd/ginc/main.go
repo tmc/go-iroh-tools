@@ -24,6 +24,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -33,10 +34,12 @@ import (
 const defaultALPN = "iroh-tools/stream/1"
 
 func main() {
-	tool.Run(run)
+	tool.Run(func(ctx context.Context, args []string) error {
+		return run(ctx, args, os.Stdin, os.Stdout)
+	})
 }
 
-func run(ctx context.Context, args []string) error {
+func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("ginc", flag.ContinueOnError)
 	var bind tool.BindFlags
 	alpn := fs.String("alpn", defaultALPN, "ALPN protocol")
@@ -72,5 +75,5 @@ func run(ctx context.Context, args []string) error {
 	// Uploading first and only then reading the reply deadlocks as soon as the
 	// payload exceeds the peer's flow-control window: the peer stops reading
 	// to drain a send buffer nobody is receiving, and both sides wait.
-	return tool.CopyStdio(ctx, stream, os.Stdin, os.Stdout)
+	return tool.CopyStdio(ctx, stream, stdin, stdout)
 }
